@@ -2,20 +2,24 @@ import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 import { API_BASE, apiRequest } from './api.js';
 import { LoginRegisterPanel } from './components/LoginRegisterPanel.js';
 import { AdminDashboard } from './components/AdminDashboard.js';
+import { CompanyDashboard } from './components/CompanyDashboard.js';
 
 createApp({
-  components: { LoginRegisterPanel, AdminDashboard },
+  components: { LoginRegisterPanel, AdminDashboard, CompanyDashboard },
   data() {
     return {
       token: localStorage.getItem('token') || '',
       user: JSON.parse(localStorage.getItem('user') || 'null'),
       message: '',
       adminPage: 'stats',
+      companyPage: 'stats',
       state: {
         login: { email: '', password: '' },
         student: { email: '', password: '', full_name: '', phone: '', branch: '', cgpa: '', year: '' },
         company: { email: '', password: '', company_name: '', hr_contact: '', website: '', description: '' },
         admin: { q: '', stats: {}, companies: [], drives: [], students: [], applications: [], searchResults: null },
+        companyPanel: { summary: null, drives: [], applications: [] },
+        drive: { job_title: '', job_description: '', eligible_branch: '', eligible_year: '', min_cgpa: '', application_deadline: '', location: '', ctc_lpa: '' },
       },
     };
   },
@@ -38,6 +42,10 @@ createApp({
           await this.loadAdminDrives();
           await this.loadAdminStudents();
           await this.loadAdminApplications();
+        }
+        if (this.user.role === 'company') {
+          await this.loadCompanyDashboard();
+          await this.loadCompanyDrives();
         }
       });
     },
@@ -103,6 +111,30 @@ createApp({
         this.message = result.message;
       });
     },
+    async loadCompanyDashboard() {
+      return this.run(async () => { this.state.companyPanel.summary = await apiRequest('/company/dashboard', { token: this.token }); });
+    },
+    async loadCompanyDrives() {
+      return this.run(async () => { this.state.companyPanel.drives = await apiRequest('/company/drives', { token: this.token }); });
+    },
+    async loadCompanyApplications() {
+      return this.run(async () => { this.state.companyPanel.applications = await apiRequest('/company/applications', { token: this.token }); });
+    },
+    async createDrive() {
+      return this.run(async () => {
+        this.message = (await apiRequest('/company/drives', { token: this.token, method: 'POST', body: this.state.drive })).message;
+        await this.loadCompanyDashboard();
+        await this.loadCompanyDrives();
+      });
+    },
+    async updateCompanyApplication(applicationId, status, interviewAt, remarks) {
+      return this.run(async () => {
+        const body = { status, remarks };
+        if (interviewAt) body.interview_at = interviewAt;
+        await apiRequest(`/company/applications/${applicationId}`, { token: this.token, method: 'PATCH', body });
+        await this.loadCompanyApplications();
+      });
+    },
     goToDashboard() {
       if (!this.user) return;
       if (this.user.role === 'admin') {
@@ -112,6 +144,11 @@ createApp({
         this.loadAdminDrives();
         this.loadAdminStudents();
         this.loadAdminApplications();
+      } else if (this.user.role === 'company') {
+        this.companyPage = 'stats';
+        this.loadCompanyDashboard();
+        this.loadCompanyDrives();
+        this.loadCompanyApplications();
       }
     },
     run(fn) {
@@ -133,6 +170,11 @@ createApp({
             <button class="btn btn-sm" :class="adminPage === 'companies_drives' ? 'btn-primary' : 'btn-outline-primary'" @click="adminPage = 'companies_drives'">Companies & Drives</button>
             <button class="btn btn-sm" :class="adminPage === 'students' ? 'btn-primary' : 'btn-outline-primary'" @click="adminPage = 'students'">Students</button>
             <button class="btn btn-sm" :class="adminPage === 'applications' ? 'btn-primary' : 'btn-outline-primary'" @click="adminPage = 'applications'">Applications</button>
+          </div>
+          <div v-if="user && user.role === 'company'" class="d-flex gap-2 ms-3">
+            <button class="btn btn-sm" :class="companyPage === 'create_drive' ? 'btn-primary' : 'btn-outline-primary'" @click="companyPage = 'create_drive'">Create Drive</button>
+            <button class="btn btn-sm" :class="companyPage === 'drives' ? 'btn-primary' : 'btn-outline-primary'" @click="companyPage = 'drives'">Placement Drives</button>
+            <button class="btn btn-sm" :class="companyPage === 'applicants' ? 'btn-primary' : 'btn-outline-primary'" @click="companyPage = 'applicants'">Applicants</button>
           </div>
           <div class="d-flex gap-2 ms-auto">
             <button class="btn btn-outline-primary btn-sm" @click="goToDashboard">Dashboard</button>
@@ -167,10 +209,21 @@ createApp({
         @generate-report="generateAdminReport"
       />
 
+      <company-dashboard
+        v-else-if="user && user.role==='company'"
+        :state="state"
+        :company-page="companyPage"
+        :load-dashboard="loadCompanyDashboard.bind(this)"
+        :load-drives="loadCompanyDrives.bind(this)"
+        :load-applications="loadCompanyApplications.bind(this)"
+        :create-drive="createDrive.bind(this)"
+        :update-application="updateCompanyApplication.bind(this)"
+      />
+
       <div v-else class="card glass text-center py-5">
         <div class="card-body">
           <h3 class="text-success">Authenticated Successfully</h3>
-          <p class="text-muted">You are logged in as a {{ user ? user.role : '' }}. Role-based dashboard for this role is not active in Milestone 3.</p>
+          <p class="text-muted">You are logged in as a {{ user ? user.role : '' }}. Student dashboard is not active in Milestone 4.</p>
         </div>
       </div>
 
