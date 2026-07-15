@@ -1,4 +1,3 @@
-import os
 from flask import Flask, render_template, send_from_directory
 from flask_cors import CORS
 
@@ -9,6 +8,7 @@ from routes.auth_routes import auth_routes
 from routes.user_routes import user_routes
 from routes.admin_routes import admin_routes
 from routes.company_routes import company_routes
+from routes.student_routes import student_routes
 
 app = Flask(
     __name__,
@@ -28,6 +28,7 @@ app.register_blueprint(auth_routes, url_prefix="/api/auth")
 app.register_blueprint(user_routes, url_prefix="/api/user")
 app.register_blueprint(admin_routes, url_prefix="/api/admin")
 app.register_blueprint(company_routes, url_prefix="/api/company")
+app.register_blueprint(student_routes, url_prefix="/api/student")
 
 
 @app.route('/uploads/<path:filename>')

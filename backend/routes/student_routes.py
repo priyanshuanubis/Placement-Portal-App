@@ -1,0 +1,1 @@
+from routes.student import bp as student_routes

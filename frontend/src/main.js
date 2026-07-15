@@ -3,15 +3,17 @@ import { API_BASE, apiRequest } from './api.js';
 import { LoginRegisterPanel } from './components/LoginRegisterPanel.js';
 import { AdminDashboard } from './components/AdminDashboard.js';
 import { CompanyDashboard } from './components/CompanyDashboard.js';
+import { StudentDashboard } from './components/StudentDashboard.js';
 
 createApp({
-  components: { LoginRegisterPanel, AdminDashboard, CompanyDashboard },
+  components: { LoginRegisterPanel, AdminDashboard, CompanyDashboard, StudentDashboard },
   data() {
     return {
       token: localStorage.getItem('token') || '',
       user: JSON.parse(localStorage.getItem('user') || 'null'),
       message: '',
       adminPage: 'stats',
+      studentPage: 'stats',
       companyPage: 'stats',
       state: {
         login: { email: '', password: '' },
@@ -20,6 +22,8 @@ createApp({
         admin: { q: '', stats: {}, companies: [], drives: [], students: [], applications: [], searchResults: null },
         companyPanel: { summary: null, drives: [], applications: [] },
         drive: { job_title: '', job_description: '', eligible_branch: '', eligible_year: '', min_cgpa: '', application_deadline: '', location: '', ctc_lpa: '' },
+        studentPanel: { summary: null, companies: [], drives: [], applications: [], profile: null, resumeFileName: '', search: '', companySearch: '' },
+        profileForm: { full_name: '', phone: '', branch: '', cgpa: '', year: '', resume_link: '' },
       },
     };
   },
@@ -36,6 +40,7 @@ createApp({
         this.user = data.user;
         localStorage.setItem('token', this.token); localStorage.setItem('user', JSON.stringify(this.user));
         this.message = 'Login successful';
+
         if (this.user.role === 'admin') {
           await this.loadAdminStats();
           await this.loadAdminCompanies();
@@ -46,6 +51,13 @@ createApp({
         if (this.user.role === 'company') {
           await this.loadCompanyDashboard();
           await this.loadCompanyDrives();
+        }
+        if (this.user.role === 'student') {
+          await this.loadStudentDashboard();
+          await this.loadStudentProfile();
+          await this.loadStudentCompanies();
+          await this.loadStudentDrives();
+          await this.loadStudentApplications();
         }
       });
     },
@@ -100,17 +112,6 @@ createApp({
         await this.loadAdminStudents();
       });
     },
-    async sendAdminReminders() {
-      return this.run(async () => {
-        this.message = (await apiRequest('/admin/reminders', { token: this.token, method: 'POST' })).message;
-      });
-    },
-    async generateAdminReport() {
-      return this.run(async () => {
-        const result = await apiRequest('/admin/report', { token: this.token, method: 'POST' });
-        this.message = result.message;
-      });
-    },
     async loadCompanyDashboard() {
       return this.run(async () => { this.state.companyPanel.summary = await apiRequest('/company/dashboard', { token: this.token }); });
     },
@@ -135,6 +136,98 @@ createApp({
         await this.loadCompanyApplications();
       });
     },
+    async loadStudentDashboard() {
+      return this.run(async () => { this.state.studentPanel.summary = await apiRequest('/student/dashboard', { token: this.token }); });
+    },
+    async loadStudentProfile() {
+      return this.run(async () => {
+        const profile = await apiRequest('/student/profile', { token: this.token });
+        this.state.studentPanel.profile = profile;
+        this.state.profileForm = { ...profile };
+      });
+    },
+    async loadStudentCompanies() {
+      return this.run(async () => {
+        const query = this.state.studentPanel.companySearch ? `?q=${encodeURIComponent(this.state.studentPanel.companySearch)}` : '';
+        this.state.studentPanel.companies = await apiRequest(`/student/companies${query}`, { token: this.token });
+      });
+    },
+    async saveStudentProfile() {
+      return this.run(async () => {
+        this.message = (await apiRequest('/student/profile', { token: this.token, method: 'PATCH', body: this.state.profileForm })).message;
+        await this.loadStudentDashboard();
+        await this.loadStudentProfile();
+      });
+    },
+    async uploadResume(file) {
+      return this.run(async () => {
+        if (!file) throw new Error('Choose a resume file first');
+        const formData = new FormData();
+        formData.append('resume', file);
+        const response = await fetch(`${API_BASE}/student/resume`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${this.token}` },
+          body: formData,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || 'Resume upload failed');
+        this.message = payload.message;
+        await this.loadStudentProfile();
+      });
+    },
+    async loadStudentDrives() {
+      return this.run(async () => {
+        const query = this.state.studentPanel.search ? `?q=${encodeURIComponent(this.state.studentPanel.search)}` : '';
+        this.state.studentPanel.drives = await apiRequest(`/student/drives${query}`, { token: this.token });
+      });
+    },
+    async loadStudentApplications() {
+      return this.run(async () => { this.state.studentPanel.applications = await apiRequest('/student/applications', { token: this.token }); });
+    },
+    async applyDrive(id) {
+      return this.run(async () => {
+        this.message = (await apiRequest(`/student/drives/${id}/apply`, { token: this.token, method: 'POST' })).message;
+        const drive = this.state.studentPanel.drives.find(d => d.drive_id === id);
+        if (drive) {
+          drive.already_applied = true;
+        }
+        await this.loadStudentApplications();
+      });
+    },
+    async sendAdminReminders() {
+      return this.run(async () => {
+        this.message = (await apiRequest('/admin/reminders', { token: this.token, method: 'POST' })).message;
+      });
+    },
+    async generateAdminReport() {
+      return this.run(async () => {
+        const result = await apiRequest('/admin/report', { token: this.token, method: 'POST' });
+        this.message = result.message;
+      });
+    },
+    async exportCsv() {
+      return this.run(async () => {
+        const requestTask = await apiRequest('/student/export/request', { token: this.token, method: 'POST' });
+        let taskData = requestTask;
+        if (!taskData.download_ready) {
+          this.message = 'Preparing CSV export in background...';
+          for (let i = 0; i < 8; i += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            taskData = await apiRequest(`/student/export/status/${requestTask.task_id}`, { token: this.token });
+            if (taskData.download_ready) break;
+          }
+        }
+
+        const downloadUrl = `${API_BASE}/student/export/download/${requestTask.task_id}`;
+        const response = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${this.token}` } });
+        if (!response.ok) throw new Error('Export not ready yet');
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'application_history.csv'; a.click();
+        URL.revokeObjectURL(url);
+        this.message = 'CSV export is ready and downloaded';
+      });
+    },
     goToDashboard() {
       if (!this.user) return;
       if (this.user.role === 'admin') {
@@ -149,7 +242,19 @@ createApp({
         this.loadCompanyDashboard();
         this.loadCompanyDrives();
         this.loadCompanyApplications();
+      } else if (this.user.role === 'student') {
+        this.studentPage = 'stats';
+        this.loadStudentDashboard();
+        this.loadStudentProfile();
+        this.loadStudentCompanies();
+        this.loadStudentDrives();
+        this.loadStudentApplications();
       }
+    },
+    async refreshSession() {
+      if (!this.token || !this.user) return;
+      this.message = 'Refreshing dashboard...';
+      await this.goToDashboard();
     },
     run(fn) {
       return fn().catch((e) => { this.message = e.message || 'Operation failed'; });
@@ -170,6 +275,11 @@ createApp({
             <button class="btn btn-sm" :class="adminPage === 'companies_drives' ? 'btn-primary' : 'btn-outline-primary'" @click="adminPage = 'companies_drives'">Companies & Drives</button>
             <button class="btn btn-sm" :class="adminPage === 'students' ? 'btn-primary' : 'btn-outline-primary'" @click="adminPage = 'students'">Students</button>
             <button class="btn btn-sm" :class="adminPage === 'applications' ? 'btn-primary' : 'btn-outline-primary'" @click="adminPage = 'applications'">Applications</button>
+          </div>
+          <div v-if="user && user.role === 'student'" class="d-flex gap-2 ms-3">
+            <button class="btn btn-sm" :class="studentPage === 'drives' ? 'btn-primary' : 'btn-outline-primary'" @click="studentPage = 'drives'">Placement Drives</button>
+            <button class="btn btn-sm" :class="studentPage === 'applications' ? 'btn-primary' : 'btn-outline-primary'" @click="studentPage = 'applications'">My Applications</button>
+            <button class="btn btn-sm" :class="studentPage === 'profile' ? 'btn-primary' : 'btn-outline-primary'" @click="studentPage = 'profile'">Edit Profile</button>
           </div>
           <div v-if="user && user.role === 'company'" class="d-flex gap-2 ms-3">
             <button class="btn btn-sm" :class="companyPage === 'create_drive' ? 'btn-primary' : 'btn-outline-primary'" @click="companyPage = 'create_drive'">Create Drive</button>
@@ -220,12 +330,20 @@ createApp({
         :update-application="updateCompanyApplication.bind(this)"
       />
 
-      <div v-else class="card glass text-center py-5">
-        <div class="card-body">
-          <h3 class="text-success">Authenticated Successfully</h3>
-          <p class="text-muted">You are logged in as a {{ user ? user.role : '' }}. Student dashboard is not active in Milestone 4.</p>
-        </div>
-      </div>
+      <student-dashboard
+        v-else-if="user && user.role==='student'"
+        :state="state"
+        :student-page="studentPage"
+        :load-student-dashboard="loadStudentDashboard.bind(this)"
+        :load-student-profile="loadStudentProfile.bind(this)"
+        :load-student-companies="loadStudentCompanies.bind(this)"
+        :save-student-profile="saveStudentProfile.bind(this)"
+        :upload-resume="uploadResume.bind(this)"
+        :load-student-drives="loadStudentDrives.bind(this)"
+        :load-applications="loadStudentApplications.bind(this)"
+        :apply-drive="applyDrive.bind(this)"
+        :export-csv="exportCsv.bind(this)"
+      />
 
       <div v-if="message" class="alert alert-info alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3 shadow-lg" style="z-index: 1050; max-width: 500px; width: 90%;" role="alert">
         <div>{{ message }}</div>
