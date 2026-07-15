@@ -3,6 +3,7 @@ import os
 from datetime import date
 from pathlib import Path
 
+from celery.result import AsyncResult
 from flask import Blueprint, current_app, jsonify, request, send_file
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
@@ -10,6 +11,8 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import Application, CompanyProfile, PlacementDrive, StudentProfile, UserRole
 from routes.utils import role_required
+from tasks.celery_app import export_student_history
+from tasks.jobs import export_student_history_csv
 
 bp = Blueprint("student", __name__, url_prefix="/api/student")
 
@@ -205,25 +208,84 @@ def my_applications(current_user):
 @bp.get("/export")
 @role_required(UserRole.STUDENT.value)
 def export_csv(current_user):
-    return jsonify({"message": "Export service not yet configured"})
+    csv_text = export_student_history_csv(current_user.id)
+    return send_file(
+        csv_text,
+        as_attachment=True,
+        download_name="application_history.csv",
+        mimetype="text/csv",
+    )
+
+
+@bp.post("/resume")
+@role_required(UserRole.STUDENT.value)
+def upload_resume(current_user):
+    profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
+    if not profile:
+        return jsonify({"message": "Student profile missing"}), 404
+
+    uploaded = request.files.get("resume")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"message": "Resume file is required"}), 400
+
+    filename = secure_filename(uploaded.filename)
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension not in {"pdf", "doc", "docx"}:
+        return jsonify({"message": "Unsupported resume type"}), 400
+
+    resume_dir = Path(current_app.config["UPLOAD_FOLDER"]) / "resumes"
+    resume_dir.mkdir(parents=True, exist_ok=True)
+    stored_name = f"student-{profile.id}-resume.{extension}"
+    file_path = resume_dir / stored_name
+    uploaded.save(file_path)
+    profile.resume_link = f"/uploads/resumes/{stored_name}"
+    db.session.commit()
+
+    return jsonify({"message": "Resume uploaded successfully", "resume_link": profile.resume_link})
 
 
 @bp.post("/export/request")
 @role_required(UserRole.STUDENT.value)
 def request_export(current_user):
-    return jsonify({"task_id": "dummy", "status": "SUCCESS", "download_ready": True})
+    if os.getenv("CELERY_TASK_ALWAYS_EAGER", "1") == "1":
+        csv_text = export_student_history_csv(current_user.id)
+        task_id = f"local-{current_user.id}"
+        return jsonify({"task_id": task_id, "status": "SUCCESS", "download_ready": True, "csv": csv_text.getvalue().decode("utf-8")})
+
+    task = export_student_history.delay(current_user.id)
+    return jsonify({"task_id": task.id, "status": task.status, "download_ready": False})
 
 
 @bp.get("/export/status/<task_id>")
 @role_required(UserRole.STUDENT.value)
 def export_status(_current_user, task_id):
-    return jsonify({"task_id": "dummy", "status": "SUCCESS", "download_ready": True})
+    if task_id.startswith("local-"):
+        return jsonify({"task_id": task_id, "status": "SUCCESS", "download_ready": True})
+
+    task = AsyncResult(task_id, app=export_student_history.app)
+    payload = {"task_id": task.id, "status": task.status, "download_ready": task.successful()}
+    if task.successful():
+        payload["csv"] = task.result
+    return jsonify(payload)
 
 
 @bp.get("/export/download/<task_id>")
 @role_required(UserRole.STUDENT.value)
 def export_download(current_user, task_id):
-    return jsonify({"message": "Export download service not yet configured"})
+    if task_id.startswith("local-"):
+        csv_content = export_student_history_csv(current_user.id).getvalue().decode("utf-8")
+    else:
+        task = AsyncResult(task_id, app=export_student_history.app)
+        if not task.successful():
+            return jsonify({"message": "Export is not ready yet"}), 400
+        csv_content = task.result
+
+    return send_file(
+        io.BytesIO(csv_content.encode("utf-8")),
+        as_attachment=True,
+        download_name="application_history.csv",
+        mimetype="text/csv",
+    )
 
 
 @bp.patch("/profile")

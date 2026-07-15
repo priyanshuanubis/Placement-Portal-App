@@ -4,6 +4,7 @@ from sqlalchemy import or_
 from extensions import db
 from models import Application, ApprovalStatus, CompanyProfile, PlacementDrive, StudentProfile, User, UserRole
 from routes.utils import role_required
+from tasks.jobs import daily_deadline_reminders, monthly_admin_report
 
 bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
@@ -216,10 +217,12 @@ def list_applications(_user):
 @bp.post("/reminders")
 @role_required(UserRole.ADMIN.value)
 def send_reminders(_user):
-    return jsonify({"message": "Reminder service not yet configured"})
+    result = daily_deadline_reminders()
+    return jsonify(result)
 
 
 @bp.post("/report")
 @role_required(UserRole.ADMIN.value)
 def generate_report(_user):
-    return jsonify({"message": "Report service not yet configured"})
+    report_html = monthly_admin_report()
+    return jsonify({"message": "Monthly report generated", "report_html": report_html})

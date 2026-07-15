@@ -12,6 +12,16 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=12)
     UPLOAD_FOLDER = str(BASE_DIR / "uploads")
 
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL
+
+    CACHE_TYPE = "RedisCache"
+    CACHE_REDIS_URL = REDIS_URL
+    CACHE_DEFAULT_TIMEOUT = 120
+
 
 class DevConfig(Config):
     DEBUG = True
+    if os.getenv("REDIS_DISABLED", "0") == "1":
+        CACHE_TYPE = "SimpleCache"
