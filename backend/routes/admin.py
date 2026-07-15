@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy import or_
 
-from extensions import db
+from extensions import cache, db
 from models import Application, ApprovalStatus, CompanyProfile, PlacementDrive, StudentProfile, User, UserRole
 from routes.utils import role_required
 from tasks.jobs import daily_deadline_reminders, monthly_admin_report
@@ -11,6 +11,7 @@ bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 
 @bp.get("/dashboard")
 @role_required(UserRole.ADMIN.value)
+@cache.cached(timeout=30)
 def dashboard(_user):
     return jsonify(
         {
@@ -73,6 +74,10 @@ def approve_company(_user, company_id):
         for drive in drives:
             drive.status = ApprovalStatus.CLOSED.value
     db.session.commit()
+    try:
+        cache.clear()
+    except Exception:
+        pass
     return jsonify({"message": "Company status updated"})
 
 
@@ -115,6 +120,10 @@ def approve_drive(_user, drive_id):
 
     drive.status = status
     db.session.commit()
+    try:
+        cache.clear()
+    except Exception:
+        pass
     return jsonify({"message": "Drive status updated"})
 
 

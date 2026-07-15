@@ -7,7 +7,7 @@ import redis
 
 from database_config import create_administrator, create_tables
 from config import DevConfig
-from extensions import db, jwt
+from extensions import cache, db, jwt
 from routes.admin_routes import admin_routes
 from routes.auth_routes import auth_routes
 from routes.company_routes import company_routes
@@ -47,7 +47,7 @@ Session(app)
 
 db.init_app(app)
 jwt.init_app(app)
-
+cache.init_app(app)
 
 app.register_blueprint(auth_routes, url_prefix="/api/auth")
 app.register_blueprint(user_routes, url_prefix="/api/user")

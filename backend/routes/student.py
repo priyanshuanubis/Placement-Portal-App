@@ -8,7 +8,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file
 from sqlalchemy import or_
 from werkzeug.utils import secure_filename
 
-from extensions import db
+from extensions import cache, db
 from models import Application, CompanyProfile, PlacementDrive, StudentProfile, UserRole
 from routes.utils import role_required
 from tasks.celery_app import export_student_history
@@ -60,8 +60,16 @@ def profile(current_user):
     )
 
 
+def make_student_drives_key():
+    from flask_jwt_extended import get_jwt_identity
+    identity = get_jwt_identity() or "guest"
+    q = request.args.get("q", "").strip()
+    return f"student_drives:{identity}:{q}"
+
+
 @bp.get("/drives")
 @role_required(UserRole.STUDENT.value)
+@cache.cached(timeout=60, key_prefix=make_student_drives_key)
 def eligible_drives(current_user):
     profile = StudentProfile.query.filter_by(user_id=current_user.id).first()
     if not profile:
@@ -112,6 +120,7 @@ def eligible_drives(current_user):
 
 @bp.get("/companies")
 @role_required(UserRole.STUDENT.value)
+@cache.cached(timeout=60, query_string=True)
 def approved_companies(current_user):
     q = request.args.get("q", "").strip()
     query = CompanyProfile.query.filter(CompanyProfile.approval_status == "approved")
