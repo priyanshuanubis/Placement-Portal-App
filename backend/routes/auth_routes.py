@@ -1,0 +1,1 @@
+from routes.auth import bp as auth_routes
