@@ -7,6 +7,7 @@ from database_config import create_administrator, create_tables
 from extensions import db, jwt
 from routes.auth_routes import auth_routes
 from routes.user_routes import user_routes
+from routes.admin_routes import admin_routes
 
 app = Flask(
     __name__,
@@ -24,6 +25,7 @@ jwt.init_app(app)
 
 app.register_blueprint(auth_routes, url_prefix="/api/auth")
 app.register_blueprint(user_routes, url_prefix="/api/user")
+app.register_blueprint(admin_routes, url_prefix="/api/admin")
 
 
 @app.route('/uploads/<path:filename>')
